@@ -136,8 +136,9 @@ describe('token-weather-zh', () => {
     const steadyTree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 110, props: {} })
     const steadyTexts = JSON.stringify(steadyTree)
 
-    // 桌面宠物常态伴生 (草原采风场景与看板道具)
-    expect(steadyTexts).toContain('🦀')
+    // 桌面宠物常态伴生 (Claude 官方暖橙方块小蟹、草原采风场景与看板道具)
+    expect(steadyTexts).toContain('[•‿•]')
+    expect(steadyTexts).toContain('#de7356')
     expect(steadyTexts).toContain('草原采风')
     expect(steadyTexts).toContain('翻阅草丛卷轴')
     expect(steadyTexts).toContain('[auth.ts]')

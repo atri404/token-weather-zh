@@ -1,7 +1,7 @@
 {
   "name": "token-weather",
-  "version": "0.7.0",
-  "description": "上下文窗口天气预报(汉化增强版): claude-deck 同款 segments 高级分段彩色进度条(▰ ▱与暗轨底色)、累计输入/输出/推理/命中率、真实流式模型输出速率，融入桌面伴生宠物 6 场景道具与气象变动建议。",
+  "version": "0.8.0",
+  "description": "上下文窗口天气预报(汉化增强版): claude-deck 同款 segments 高级分段彩色进度条(▰ ▱与暗轨底色)、累计输入/输出/推理/命中率、真实流式模型输出速率，融入 Claude 官方暖橙方块小蟹(Claw'd) 6 场景道具与气象变动建议。",
   "author": {
     "name": "atri404"
   }
