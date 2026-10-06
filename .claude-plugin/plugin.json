@@ -1,6 +1,6 @@
 {
   "name": "token-weather",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "上下文窗口天气预报(汉化增强版): 天气图标、占用百分比、累计输入/输出/推理、缓存命中率、模型输出速率与走势图。",
   "author": {
     "name": "atri404"
