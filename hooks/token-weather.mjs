@@ -4,11 +4,11 @@
 // Token Weather 汉化增强版: 上下文窗口实时天气预报（显示在提示符上方）
 //
 // turn.complete: 每轮主循环结束后读取 $.session.usage() 更新上下文占用;
-//                并从 e.usage 累计会话生成 token, 按 e.durationMs 测量模型输出速率。
+//                并从 e.usage 累计输入、输出、缓存读取, 计算命中率与输出速率。
 // session.start: 会话启动时先采样一次, 保证首轮前即有预报。
 // ui.render (AbovePrompt): 单行渲染:
 //                天气图标 + 预报词 + 上下文百分比 + 占用/上限
-//                + 会话累计 token + 模型输出速率 + 近期趋势图 + 变动差值。
+//                + 累计输入/输出/命中率 + 模型输出速率 + 近期趋势图 + 变动差值。
 
 const HISTORY = 12;
 const BARS = "▁▂▃▄▅▆▇█";
@@ -24,8 +24,10 @@ const FORECAST = [
 
 // 历史占用读数: { tokens, window, percent }, 旧 -> 新
 let readings = [];
-// 会话累计输出 token 数 (每轮 output_tokens 累加)
-let totalOutput = 0;
+// 会话累计统计
+let totalInput = 0;       // 总输入 = 未缓存输入 + 缓存写入 + 缓存读取
+let totalOutput = 0;      // 总输出
+let totalCacheRead = 0;   // 缓存命中的输入
 // 最新一轮的模型输出速率 (tokens/s)
 let lastRate = null;
 
@@ -33,7 +35,9 @@ export function register(on) {
   on("session.start", async ($, e, next) => {
     const result = await next(e);
     readings = [];
+    totalInput = 0;
     totalOutput = 0;
+    totalCacheRead = 0;
     lastRate = null;
     await takeReading($);
     return result;
@@ -44,10 +48,18 @@ export function register(on) {
     if (e.agentId) {
       return result;
     }
-    if (e.usage && typeof e.usage.output_tokens === "number" && e.usage.output_tokens > 0) {
-      totalOutput += e.usage.output_tokens;
-      if (typeof e.durationMs === "number" && e.durationMs > 0) {
-        lastRate = e.usage.output_tokens / (e.durationMs / 1000);
+    if (e.usage) {
+      const uncached = typeof e.usage.input_tokens === "number" ? e.usage.input_tokens : 0;
+      const cacheCreate = typeof e.usage.cache_creation_input_tokens === "number" ? e.usage.cache_creation_input_tokens : 0;
+      const cacheRead = typeof e.usage.cache_read_input_tokens === "number" ? e.usage.cache_read_input_tokens : 0;
+      const out = typeof e.usage.output_tokens === "number" ? e.usage.output_tokens : 0;
+
+      totalInput += (uncached + cacheCreate + cacheRead);
+      totalOutput += out;
+      totalCacheRead += cacheRead;
+
+      if (out > 0 && typeof e.durationMs === "number" && e.durationMs > 0) {
+        lastRate = out / (e.durationMs / 1000);
       }
     }
     await takeReading($);
@@ -95,9 +107,14 @@ function band(Box, Text, columns) {
   ];
 
   // 中等宽度及以上展示累计和速率
-  if (columns >= 65) {
-    if (totalOutput > 0) {
-      parts.push(Text({ dimColor: true, children: `  ∑ 累计 ${short(totalOutput)}` }));
+  if (columns >= 68) {
+    if (totalInput > 0 || totalOutput > 0) {
+      let statStr = `  ∑ 入 ${short(totalInput)} 出 ${short(totalOutput)}`;
+      if (totalInput > 0) {
+        const hitRate = Math.round((totalCacheRead / totalInput) * 100);
+        statStr += ` 命中 ${hitRate}%`;
+      }
+      parts.push(Text({ dimColor: true, children: statStr }));
     }
     if (lastRate !== null && lastRate > 0) {
       parts.push(Text({ dimColor: true, children: `  ⚡ ${rate(lastRate)}/s` }));
@@ -105,7 +122,7 @@ function band(Box, Text, columns) {
   }
 
   // 宽屏额外展示趋势走势图
-  if (columns >= 85) {
+  if (columns >= 92) {
     parts.push(Text({ dimColor: true, children: "   近几轮 " }));
     parts.push(Text({ color: f.color, children: chart() }));
     if (trend) {
