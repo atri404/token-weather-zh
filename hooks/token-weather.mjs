@@ -479,13 +479,14 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
     Raster({ key: KEY, columns: W, rows: ROWS, cells }),
   ];
 
-  // 第二层: 伴生言语提示框（无缝排列在小蟹及标牌右方）
+  // 第二层: 伴生言语提示框（紧跟在小蟹/标牌右侧，告别空隙）
   if (act.say) {
     const chars = Array.from(act.say);
     const shown = (typed > 0 && typed < chars.length) ? chars.slice(0, typed).join('') : act.say;
-    // 动态计算气泡在第二行的起始 X 坐标
-    const startX = Math.min(32, Math.floor(W * 0.35));
-    const availW = Math.max(16, W - startX - 2);
+    // 小蟹宽 8，若有标牌则占用约 label.length + 4，无标牌时言语紧贴小蟹 (startX = 11)
+    const signLen = act.label ? Math.min(22, act.label.length + 4) : 0;
+    const startX = signLen > 0 ? (11 + signLen + 2) : 11;
+    const availW = Math.max(16, W - startX - 1);
     const bubbleBox = Box({
       position: "absolute",
       top: 0,
