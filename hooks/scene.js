@@ -56,21 +56,19 @@ const sanitize = (label) => {
   return s.length > 20 ? `${s.slice(0, 19)}~` : s;
 };
 
-// 工具调用动态滑入标牌：纯字符图层绘制在小蟹右侧
-const drawSign = (c, act, crabWidth, now) => {
+// 工具调用标牌：直接静止贴在小蟹身旁展示（告别从右滑到左的晃眼横移，温和淡雅）
+const drawSign = (c, act, crabWidth) => {
   if (!act.label) return;
   const label = sanitize(act.label);
   const textLen = label.length;
-  // 标牌由远及近滑入，最终停靠在小蟹右侧 + 2 格位置
-  const targetX = crabWidth + 2;
-  const slideInX = c.W - Math.floor((now - act.at) / 25);
-  const x = Math.max(targetX, slideInX);
-  if (x >= c.W) return;
+  // 直接锚定在小蟹右侧 1 格，安静自然
+  const x = crabWidth + 1;
+  if (x + textLen + 2 >= c.W) return;
 
   const { border, text } = SIGN[act.scene] || SIGN.meadow;
   // 第一行：[ 道具/文件名 ]
   glyph(c, x, 0, `[${label}]`, text);
-  // 第二行：工具标识小阴影或场景徽章
+  // 第二行：工具标识小阴影托盘
   glyph(c, x, 1, `└${'─'.repeat(Math.min(textLen, Math.max(0, c.W - x - 2)))}`, border);
 };
 
@@ -122,8 +120,8 @@ export const paint = (layout, act, now, t) => {
   // 左下角绘制迷你小蟹 (宽 8 像素 = 8 格半块)
   drawMiniCrab(c, crabX, t);
 
-  // 渲染工具调用滑入特效与道具标牌
-  drawSign(c, act, crabX + 8, now);
+  // 渲染工具调用场景道具标牌（静止附着在小蟹身旁）
+  drawSign(c, act, crabX + 8);
 
   const words = new Uint32Array(W * R * 3);
   for (let cy = 0; cy < R; cy++) {
