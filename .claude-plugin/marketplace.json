@@ -1,0 +1,16 @@
+{
+  "name": "token-weather-zh",
+  "owner": {
+    "name": "atri404"
+  },
+  "metadata": {
+    "description": "Token Weather 汉化增强版:上下文窗口天气预报,含累计 token 与输出速率。"
+  },
+  "plugins": [
+    {
+      "name": "token-weather",
+      "source": "./",
+      "description": "上下文窗口天气预报:天气图标、占用百分比、趋势图表、累计 token 与输出速率。"
+    }
+  ]
+}
