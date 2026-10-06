@@ -418,7 +418,7 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
   const f = forecastFor(now.percent);
   const trend = trendWord();
 
-  // === 第 1 行: 气象横幅与 claude-deck segments 进度条 ===
+  // === 第 1 行: 气象状态、多阶进度条与上下文容量 ===
   const line1Parts = [
     Text({ color: f.color, bold: true, children: `${f.icon}  ${f.word}` }),
   ];
@@ -430,60 +430,58 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
   line1Parts.push(Text({ children: " context" }));
   line1Parts.push(Text({ dimColor: true, children: `  ${short(now.tokens)} / ${short(now.window)}` }));
 
-  // 中等宽度及以上展示丰富累计与速率 (已有消耗时展示；若主会话尚未开始则等待统计产生)
-  if (W >= 65) {
-    if (totalInput > 0 || totalOutput > 0) {
-      line1Parts.push(Text({ dimColor: true, children: "  ∑ 累计输入 " }));
-      line1Parts.push(Text({ color: "cyan", bold: true, children: short(totalInput) }));
-      line1Parts.push(Text({ dimColor: true, children: " 累计输出 " }));
-      line1Parts.push(Text({ color: "green", bold: true, children: short(totalOutput) }));
-
-      if (totalThinking > 0) {
-        line1Parts.push(Text({ dimColor: true, children: " 推理 " }));
-        line1Parts.push(Text({ color: "magenta", bold: true, children: short(totalThinking) }));
-      }
-      const hitRate = Math.round((totalCacheRead / totalInput) * 100);
-      line1Parts.push(Text({ dimColor: true, children: " 命中 " }));
-      line1Parts.push(Text({ color: "cyan", children: `${hitRate}%` }));
-    }
-
-    if (lastRate !== null && lastRate > 0) {
-      line1Parts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
-    }
-  }
-
-  if (W >= 85) {
-    line1Parts.push(Text({ dimColor: true, children: "   近几轮 " }));
-    line1Parts.push(Text({ color: f.color, children: chart() }));
-    if (trend) {
-      line1Parts.push(Text({ dimColor: true, children: `  ${trend}` }));
-    }
-  }
-
   const row1 = Box({ flexDirection: "row", width: W, children: line1Parts });
 
-  // 窄屏降级只显示横幅
+  // 极窄屏降级只显示第一行气象与进度条
   if (W < 45) {
     mount = null;
     return Box({ flexDirection: "column", width: W, children: [row1] });
   }
 
-  // === 第 2 块: 纯粹左下角 2 行迷你小蟹与言语标牌 (0 背景干扰) ===
-  const crabX = 1; // 紧贴左下角
+  // === 第 2 行: 会话统计指标（累计输入/输出/推理/命中率/流式速率/走势图，独立整行展示） ===
+  const line2Parts = [];
+  if (W >= 60 && (totalInput > 0 || totalOutput > 0)) {
+    line2Parts.push(Text({ dimColor: true, children: "∑ 累计输入 " }));
+    line2Parts.push(Text({ color: "cyan", bold: true, children: short(totalInput) }));
+    line2Parts.push(Text({ dimColor: true, children: "  累计输出 " }));
+    line2Parts.push(Text({ color: "green", bold: true, children: short(totalOutput) }));
+
+    if (totalThinking > 0) {
+      line2Parts.push(Text({ dimColor: true, children: "  推理 " }));
+      line2Parts.push(Text({ color: "magenta", bold: true, children: short(totalThinking) }));
+    }
+    const hitRate = Math.round((totalCacheRead / totalInput) * 100);
+    line2Parts.push(Text({ dimColor: true, children: "  命中 " }));
+    line2Parts.push(Text({ color: "cyan", children: `${hitRate}%` }));
+  }
+
+  if (W >= 60 && lastRate !== null && lastRate > 0) {
+    line2Parts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
+  }
+
+  if (W >= 75) {
+    line2Parts.push(Text({ dimColor: true, children: "   近几轮 " }));
+    line2Parts.push(Text({ color: f.color, children: chart() }));
+    if (trend) {
+      line2Parts.push(Text({ dimColor: true, children: `  ${trend}` }));
+    }
+  }
+
+  const row2 = line2Parts.length > 0 ? Box({ flexDirection: "row", width: W, children: line2Parts }) : null;
+
+  // === 第 3 行: 最底部的左下角迷你小蟹、场景标牌与伴生言语 💬 ===
+  const crabX = 1;
   mount = { requestId, W, R: ROWS, crabX };
   const currentTime = Date.now();
   const cells = paint(mount, act, currentTime, currentTime - EPOCH);
 
-  // 第一层: 2行 Raster (包含左下角迷你小方蟹以及工具滑入特效标牌)
   const theaterChildren = [
     Raster({ key: KEY, columns: W, rows: ROWS, cells }),
   ];
 
-  // 第二层: 伴生言语提示框（紧跟在小蟹/标牌右侧，告别空隙）
   if (act.say) {
     const chars = Array.from(act.say);
     const shown = (typed > 0 && typed < chars.length) ? chars.slice(0, typed).join('') : act.say;
-    // 小蟹宽 8，若有标牌则占用约 label.length + 4，无标牌时言语紧贴小蟹 (startX = 11)
     const signLen = act.label ? Math.min(22, act.label.length + 4) : 0;
     const startX = signLen > 0 ? (11 + signLen + 2) : 11;
     const availW = Math.max(16, W - startX - 1);
@@ -501,9 +499,13 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
     theaterChildren.push(bubbleBox);
   }
 
-  const theaterBox = Box({ width: W, height: ROWS, children: theaterChildren });
+  const rowCrab = Box({ width: W, height: ROWS, children: theaterChildren });
 
-  return Box({ flexDirection: "column", width: W, children: [row1, theaterBox] });
+  const children = [row1];
+  if (row2) children.push(row2);
+  children.push(rowCrab);
+
+  return Box({ flexDirection: "column", width: W, children });
 }
 
 function renderProgressBar(Text, percent, tokens) {
