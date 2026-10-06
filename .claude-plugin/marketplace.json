@@ -4,13 +4,13 @@
     "name": "atri404"
   },
   "metadata": {
-    "description": "Token Weather 汉化增强版:上下文窗口天气预报,含累计 token 与输出速率。"
+    "description": "Token Weather 汉化增强版: 上下文窗口天气预报, 含多阶分段彩色进度条、桌面伴生宠物与气象变动建议。"
   },
   "plugins": [
     {
       "name": "token-weather",
       "source": "./",
-      "description": "上下文窗口天气预报: 高饱和度彩色进度条、累计输入/累计输出/推理彩色高亮、缓存命中率、输出速率与走势图。"
+      "description": "上下文窗口天气预报: 多阶分段彩色进度条、累计输入/累计输出/推理彩色高亮、缓存命中率、输出速率与走势图，融入零Token消耗桌面宠物与阶梯变动建议提醒。"
     }
   ]
 }
