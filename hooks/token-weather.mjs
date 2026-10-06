@@ -311,6 +311,18 @@ export function register(on) {
       }
     }
 
+    if (!petAlert && act && act.say) {
+      if (act.say.startsWith('思考中') || act.say.includes('准备出发') || act.say.includes('审阅委托')) {
+        act = {
+          ...act,
+          id: nextId++,
+          say: '任务交付 · 守望天色',
+          at: Date.now(),
+        };
+        typed = 0;
+      }
+    }
+
     await takeReading($);
     return result;
   });
@@ -378,58 +390,71 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
   const f = forecastFor(now.percent);
   const trend = trendWord();
 
-  // === 第 1 行: 气象横幅与 claude-deck segments 进度条 ===
-  const line1Parts = [
+  // === 第 1 行: 气象横幅与 claude-deck segments 进度条 (两端对齐铺满全宽) ===
+  const leftParts = [
     Text({ color: f.color, bold: true, children: `${f.icon}  ${f.word}` }),
   ];
 
   const barParts = renderProgressBar(Text, now.percent, now.tokens);
-  line1Parts.push(...barParts);
+  leftParts.push(...barParts);
 
-  line1Parts.push(Text({ color: f.color, bold: true, children: `  ${now.percent}%` }));
-  line1Parts.push(Text({ children: " context" }));
-  line1Parts.push(Text({ dimColor: true, children: `  ${short(now.tokens)} / ${short(now.window)}` }));
+  leftParts.push(Text({ color: f.color, bold: true, children: `  ${now.percent}%` }));
+  leftParts.push(Text({ children: " context" }));
+  leftParts.push(Text({ dimColor: true, children: `  ${short(now.tokens)} / ${short(now.window)}` }));
+
+  const rightParts = [];
 
   if (W >= 65) {
     if (totalInput > 0 || totalOutput > 0) {
-      line1Parts.push(Text({ dimColor: true, children: "  ∑ 累计输入 " }));
-      line1Parts.push(Text({ color: "cyan", bold: true, children: short(totalInput) }));
-      line1Parts.push(Text({ dimColor: true, children: " 累计输出 " }));
-      line1Parts.push(Text({ color: "green", bold: true, children: short(totalOutput) }));
+      rightParts.push(Text({ dimColor: true, children: "∑ 累计输入 " }));
+      rightParts.push(Text({ color: "cyan", bold: true, children: short(totalInput) }));
+      rightParts.push(Text({ dimColor: true, children: " 累计输出 " }));
+      rightParts.push(Text({ color: "green", bold: true, children: short(totalOutput) }));
 
       if (totalThinking > 0) {
-        line1Parts.push(Text({ dimColor: true, children: " 推理 " }));
-        line1Parts.push(Text({ color: "magenta", bold: true, children: short(totalThinking) }));
+        rightParts.push(Text({ dimColor: true, children: " 推理 " }));
+        rightParts.push(Text({ color: "magenta", bold: true, children: short(totalThinking) }));
       }
       if (totalInput > 0) {
         const hitRate = Math.round((totalCacheRead / totalInput) * 100);
-        line1Parts.push(Text({ dimColor: true, children: " 命中 " }));
-        line1Parts.push(Text({ color: "cyan", children: `${hitRate}%` }));
+        rightParts.push(Text({ dimColor: true, children: " 命中 " }));
+        rightParts.push(Text({ color: "cyan", children: `${hitRate}%` }));
       }
     }
     if (lastRate !== null && lastRate > 0) {
-      line1Parts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
+      rightParts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
     }
   }
 
   if (W >= 90) {
-    line1Parts.push(Text({ dimColor: true, children: "   近几轮 " }));
-    line1Parts.push(Text({ color: f.color, children: chart() }));
-    if (trend) line1Parts.push(Text({ dimColor: true, children: `  ${trend}` }));
+    rightParts.push(Text({ dimColor: true, children: "   近几轮 " }));
+    rightParts.push(Text({ color: f.color, children: chart() }));
+    if (trend) rightParts.push(Text({ dimColor: true, children: `  ${trend}` }));
   }
 
-  const row1 = Box({ flexDirection: "row", children: line1Parts });
+  let row1;
+  if (rightParts.length > 0) {
+    const leftBox = Box({ flexDirection: "row", children: leftParts });
+    const rightBox = Box({ flexDirection: "row", children: rightParts });
+    row1 = Box({ flexDirection: "row", width: W, justifyContent: "space-between", children: [leftBox, rightBox] });
+  } else {
+    row1 = Box({ flexDirection: "row", width: W, children: leftParts });
+  }
 
   // 窄屏降级只显示横幅
   if (W < 60) {
     mount = null;
-    return Box({ flexDirection: "column", paddingX: 1, children: [row1] });
+    return Box({ flexDirection: "column", width: W, children: [row1] });
   }
 
+  // 暗轨分割线 (连接横幅与大剧场舞台，构建整体仪表盘质感)
+  const divider = Box({ width: W, children: [Text({ color: TRACK_COLOR, children: "─".repeat(W) })] });
+
   // === 第 2 块: 原作者 9 行像素大剧场 (Crab Theater Raster) ===
-  const crabX = Math.floor(W * 0.25);
+  const crabX = Math.max(2, Math.floor(W * 0.18));
   const bx = crabX + 15;
-  const bw = Math.min(width(act.say) + 4, W - bx - 1, 60);
+  const maxBw = Math.max(20, W - bx - 2);
+  const bw = Math.min(width(act.say) + 4, maxBw);
   const bubble = act.say && bw >= 12 ? { x: bx, w: bw } : null;
 
   mount = { requestId, W, R: ROWS, crabX, bubble };
@@ -459,7 +484,7 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
 
   const theaterBox = Box({ width: W, height: ROWS, children: theaterChildren });
 
-  return Box({ flexDirection: "column", paddingX: 1, children: [row1, theaterBox] });
+  return Box({ flexDirection: "column", width: W, children: [row1, divider, theaterBox] });
 }
 
 function renderProgressBar(Text, percent, tokens) {
