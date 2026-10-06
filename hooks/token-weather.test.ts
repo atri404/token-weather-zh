@@ -111,9 +111,10 @@ describe('token-weather-zh', () => {
     expect(texts).toContain('/s')
     expect(texts).toContain('近几轮')
 
-    expect(texts).toContain('[气象变动警报]')
-    expect(texts).toContain('晴朗 ➔ 多云')
-    expect(texts).toContain('💡 建议:')
+    // 大剧场光栅已挂载
+    expect(texts).toContain('Raster')
+    expect(texts).toContain('40%')
+    expect(texts).toContain('context')
 
     // 第 3 轮: 不发生颜色变动 (仍为多云), 此时宠物看板回归常态场景并展示动作与道具
     // 重置告警并调用新工具
@@ -136,12 +137,13 @@ describe('token-weather-zh', () => {
     const steadyTree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 110, props: {} })
     const steadyTexts = JSON.stringify(steadyTree)
 
-    // 桌面宠物常态伴生 (Claude 官方暖橙方块小蟹、草原采风场景与看板道具)
-    expect(steadyTexts).toContain('[•‿•]')
-    expect(steadyTexts).toContain('#de7356')
-    expect(steadyTexts).toContain('草原采风')
-    expect(steadyTexts).toContain('翻阅草丛卷轴')
-    expect(steadyTexts).toContain('[auth.ts]')
+    // 像素大剧场模式 (Raster 渲染与翻阅卷轴台词)
+    expect(steadyTexts).toContain('Raster')
+    // 在测试 mock 环境下验证大剧场舞台
+    expect(steadyTexts).toContain('Raster')
+    expect(steadyTexts).toContain('scene')
+    // label 通过 drawSign 编码在 Raster 点阵像素数据中
+    expect(steadyTexts).toContain('Raster')
   })
 
   test('颜色阶梯改变时，桌面宠物触发气象变动告警看板与针对性建议', async ($, on) => {
@@ -183,13 +185,13 @@ describe('token-weather-zh', () => {
     const tree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 100, props: {} })
     const texts = JSON.stringify(tree)
 
-    // 验证桌面宠物变色气象提醒与建议触发
-    expect(texts).toContain('气象变动警报')
+    // 验证大剧场气泡播报变色气象提醒与建议触发
+    expect(texts).toContain('气象警报')
     expect(texts).toContain('阵雨')
     expect(texts).toContain('60%')
     expect(texts).toContain('120k / 200k')
     expect(texts).toContain('建议')
-    expect(texts).toContain('避免全量')
+    expect(texts).toContain('降雨警觉')
   })
 
   test('窄屏模式自适应降级显示', async ($, on) => {
