@@ -418,94 +418,105 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
   const f = forecastFor(now.percent);
   const trend = trendWord();
 
-  // === 第 1 行: 气象状态、多阶进度条与上下文容量 ===
-  const line1Parts = [
-    Text({ color: f.color, bold: true, children: `${f.icon}  ${f.word}` }),
-  ];
-
-  const barParts = renderProgressBar(Text, now.percent, now.tokens);
-  line1Parts.push(...barParts);
-
-  line1Parts.push(Text({ color: f.color, bold: true, children: `  ${now.percent}%` }));
-  line1Parts.push(Text({ children: " context" }));
-  line1Parts.push(Text({ dimColor: true, children: `  ${short(now.tokens)} / ${short(now.window)}` }));
-
-  const row1 = Box({ flexDirection: "row", width: W, children: line1Parts });
-
-  // 极窄屏降级只显示第一行气象与进度条
+  // 极窄屏降级仅显示上下文进度
   if (W < 45) {
     mount = null;
-    return Box({ flexDirection: "column", width: W, children: [row1] });
+    return Box({
+      flexDirection: "column",
+      width: W,
+      children: [
+        Box({
+          flexDirection: "row",
+          width: W,
+          children: [
+            Text({ color: f.color, bold: true, children: `${f.icon}  ${f.word}` }),
+            ...renderProgressBar(Text, now.percent, now.tokens),
+            Text({ color: f.color, bold: true, children: `  ${now.percent}%` }),
+            Text({ children: " context" }),
+            Text({ dimColor: true, children: `  ${short(now.tokens)} / ${short(now.window)}` }),
+          ],
+        }),
+      ],
+    });
   }
 
-  // === 第 2 行: 会话统计指标（累计输入/输出/推理/命中率/流式速率/走势图，独立整行展示） ===
-  const line2Parts = [];
-  if (W >= 60 && (totalInput > 0 || totalOutput > 0)) {
-    line2Parts.push(Text({ dimColor: true, children: "∑ 累计输入 " }));
-    line2Parts.push(Text({ color: "cyan", bold: true, children: short(totalInput) }));
-    line2Parts.push(Text({ dimColor: true, children: "  累计输出 " }));
-    line2Parts.push(Text({ color: "green", bold: true, children: short(totalOutput) }));
-
-    if (totalThinking > 0) {
-      line2Parts.push(Text({ dimColor: true, children: "  推理 " }));
-      line2Parts.push(Text({ color: "magenta", bold: true, children: short(totalThinking) }));
-    }
-    const hitRate = Math.round((totalCacheRead / totalInput) * 100);
-    line2Parts.push(Text({ dimColor: true, children: "  命中 " }));
-    line2Parts.push(Text({ color: "cyan", children: `${hitRate}%` }));
-  }
-
-  if (W >= 60 && lastRate !== null && lastRate > 0) {
-    line2Parts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
-  }
-
-  if (W >= 75) {
-    line2Parts.push(Text({ dimColor: true, children: "   近几轮 " }));
-    line2Parts.push(Text({ color: f.color, children: chart() }));
-    if (trend) {
-      line2Parts.push(Text({ dimColor: true, children: `  ${trend}` }));
-    }
-  }
-
-  const row2 = line2Parts.length > 0 ? Box({ flexDirection: "row", width: W, children: line2Parts }) : null;
-
-  // === 第 3 行: 最底部的左下角迷你小蟹、场景标牌与伴生言语 💬 ===
-  const crabX = 1;
-  mount = { requestId, W, R: ROWS, crabX };
+  // === 左侧: 2行高迷你方块小方蟹 (8列宽度，4像素高) ===
+  const CRAB_W = 8;
+  mount = { requestId, W: CRAB_W, R: ROWS, crabX: 0 };
   const currentTime = Date.now();
   const cells = paint(mount, act, currentTime, currentTime - EPOCH);
 
-  const theaterChildren = [
-    Raster({ key: KEY, columns: W, rows: ROWS, cells }),
+  const crabBox = Box({
+    width: CRAB_W,
+    height: ROWS,
+    children: [
+      Raster({ key: KEY, columns: CRAB_W, rows: ROWS, cells }),
+    ],
+  });
+
+  const rightW = Math.max(10, W - CRAB_W);
+
+  // === 第 1 行 (右侧上): 螃蟹百分比与言语台词 ===
+  const line1Parts = [
+    Text({ color: f.color, bold: true, children: ` ${now.percent}%` }),
   ];
 
   if (act.say) {
     const chars = Array.from(act.say);
     const shown = (typed > 0 && typed < chars.length) ? chars.slice(0, typed).join('') : act.say;
-    const signLen = act.label ? Math.min(22, act.label.length + 4) : 0;
-    const startX = signLen > 0 ? (11 + signLen + 2) : 11;
-    const availW = Math.max(16, W - startX - 1);
-    const bubbleBox = Box({
-      position: "absolute",
-      top: 0,
-      left: startX,
-      width: availW,
-      height: 2,
-      children: [
-        Text({ dimColor: true, children: "💬 " }),
-        Text({ color: "#de7356", children: fit(shown, availW - 4) }),
-      ],
-    });
-    theaterChildren.push(bubbleBox);
+    const isAlert = act.say.includes('警报') || act.say.includes('喜讯');
+    const textColor = isAlert ? f.color : "#de7356";
+    const availW = Math.max(10, rightW - 10);
+    line1Parts.push(Text({ dimColor: true, children: "  💬 " }));
+    line1Parts.push(Text({ color: textColor, children: fit(shown, availW) }));
   }
 
-  const rowCrab = Box({ width: W, height: ROWS, children: theaterChildren });
+  const row1 = Box({ flexDirection: "row", width: rightW, children: line1Parts });
 
-  const children = [row1];
-  if (row2) children.push(row2);
-  children.push(rowCrab);
+  // === 第 2 行 (右侧下): 气象状态、多阶暗轨进度条、上下文容量、累计指标与走势图 ===
+  const line2Parts = [
+    Text({ color: f.color, bold: true, children: ` ${f.icon} ${f.word}` }),
+  ];
 
-  return Box({ flexDirection: "column", width: W, children });
+  const barParts = renderProgressBar(Text, now.percent, now.tokens);
+  line2Parts.push(...barParts);
+
+  line2Parts.push(Text({ children: " " }));
+  line2Parts.push(Text({ dimColor: true, children: `${short(now.tokens)} / ${short(now.window)}` }));
+  line2Parts.push(Text({ children: " context" }));
+
+  if (rightW >= 60 && (totalInput > 0 || totalOutput > 0)) {
+    line2Parts.push(Text({ dimColor: true, children: "  ∑ 累计输入 " }));
+    line2Parts.push(Text({ color: "cyan", bold: true, children: short(totalInput) }));
+    line2Parts.push(Text({ dimColor: true, children: " 累计输出 " }));
+    line2Parts.push(Text({ color: "green", bold: true, children: short(totalOutput) }));
+
+    if (totalThinking > 0) {
+      line2Parts.push(Text({ dimColor: true, children: " 推理 " }));
+      line2Parts.push(Text({ color: "magenta", bold: true, children: short(totalThinking) }));
+    }
+    const hitRate = Math.round((totalCacheRead / totalInput) * 100);
+    line2Parts.push(Text({ dimColor: true, children: " 命中 " }));
+    line2Parts.push(Text({ color: "cyan", children: `${hitRate}%` }));
+  }
+
+  if (rightW >= 60 && lastRate !== null && lastRate > 0) {
+    line2Parts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
+  }
+
+  if (rightW >= 75) {
+    line2Parts.push(Text({ dimColor: true, children: "  近几轮 " }));
+    line2Parts.push(Text({ color: f.color, children: chart() }));
+    if (trend) {
+      line2Parts.push(Text({ dimColor: true, children: ` ${trend}` }));
+    }
+  }
+
+  const row2 = Box({ flexDirection: "row", width: rightW, children: line2Parts });
+
+  const rightBox = Box({ flexDirection: "column", width: rightW, height: ROWS, children: [row1, row2] });
+
+  return Box({ flexDirection: "row", width: W, height: ROWS, children: [crabBox, rightBox] });
 }
 
 function renderProgressBar(Text, percent, tokens) {
