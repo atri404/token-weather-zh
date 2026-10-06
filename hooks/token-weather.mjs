@@ -7,17 +7,18 @@
 //                并从 e.usage 累计输入、输出、推理、缓存读取, 计算命中率与输出速率。
 // session.start: 会话启动时先采样一次, 保证首轮前即有预报。
 // ui.render (AbovePrompt): 单行渲染:
-//                天气图标 + 预报词 + 上下文百分比 + 占用/上限
-//                + 累计输入/输出/推理/命中率 + 模型输出速率 + 近期趋势图 + 变动差值。
+//                天气图标 + 预报词 + 进度条 + 上下文百分比 + 占用/上限
+//                + 累计输入/累计输出/推理/命中率 + 模型输出速率 + 近期趋势图 + 变动差值。
 
 const HISTORY = 12;
 const BARS = "▁▂▃▄▅▆▇█";
+const BAR_WIDTH = 8;
 
-// 天气分档: 按上下文占用百分比。全部采用单宽文本符号以保证终端对齐。
+// 天气分档与阶梯色彩映射: 按上下文占用百分比 (<25% 绿, <50% 青, <75% 黄, <90% 洋红, ≥90% 红)
 const FORECAST = [
-  { upTo: 25, icon: "☀", word: "晴朗", color: "yellow" },
+  { upTo: 25, icon: "☀", word: "晴朗", color: "green" },
   { upTo: 50, icon: "☁", word: "多云", color: "cyan" },
-  { upTo: 75, icon: "☂", word: "阵雨", color: "blue" },
+  { upTo: 75, icon: "☂", word: "阵雨", color: "yellow" },
   { upTo: 90, icon: "☇", word: "风暴", color: "magenta" },
   { upTo: Infinity, icon: "↯", word: "亟待压缩", color: "red" },
 ];
@@ -109,16 +110,22 @@ function band(Box, Text, columns) {
   const f = forecastFor(now.percent);
   const trend = trendWord();
 
+  const filledCount = Math.min(BAR_WIDTH, Math.max(0, Math.round((now.percent / 100) * BAR_WIDTH)));
+  const emptyCount = BAR_WIDTH - filledCount;
+
   const parts = [
     Text({ color: f.color, bold: true, children: `${f.icon}  ${f.word}` }),
-    Text({ children: `  ${now.percent}% 上下文` }),
+    Text({ dimColor: true, children: "  [" }),
+    Text({ color: f.color, children: "█".repeat(filledCount) }),
+    Text({ dimColor: true, children: `${"░".repeat(emptyCount)}]` }),
+    Text({ children: `  ${now.percent}% context` }),
     Text({ dimColor: true, children: `  ${short(now.tokens)} / ${short(now.window)}` }),
   ];
 
   // 中等宽度及以上展示累计和速率
-  if (columns >= 68) {
+  if (columns >= 72) {
     if (totalInput > 0 || totalOutput > 0) {
-      let statStr = `  ∑ 输入 ${short(totalInput)} 输出 ${short(totalOutput)}`;
+      let statStr = `  ∑ 累计输入 ${short(totalInput)} 累计输出 ${short(totalOutput)}`;
       if (totalThinking > 0) {
         statStr += ` 推理 ${short(totalThinking)}`;
       }
@@ -134,7 +141,7 @@ function band(Box, Text, columns) {
   }
 
   // 宽屏额外展示趋势走势图
-  if (columns >= 95) {
+  if (columns >= 100) {
     parts.push(Text({ dimColor: true, children: "   近几轮 " }));
     parts.push(Text({ color: f.color, children: chart() }));
     if (trend) {
