@@ -4,13 +4,13 @@
     "name": "atri404"
   },
   "metadata": {
-    "description": "Token Weather 汉化增强版: 上下文窗口天气预报, 含多阶分段彩色进度条、桌面伴生宠物与气象变动建议。"
+    "description": "Token Weather 汉化增强版: 上下文天气预报, 含 claude-deck segments 进度条(▰ ▱)、真实输出速率与桌面伴生宠物。"
   },
   "plugins": [
     {
       "name": "token-weather",
       "source": "./",
-      "description": "上下文窗口天气预报: 多阶分段彩色进度条、累计输入/累计输出/推理彩色高亮、缓存命中率、输出速率与走势图，融入零Token消耗桌面宠物与阶梯变动建议提醒。"
+      "description": "上下文窗口天气预报: claude-deck 同款 segments 高级分段彩色进度条(▰ ▱与暗轨底色)、累计输入/输出/推理/命中率、真实流式模型输出速率，融入桌面伴生宠物 6 场景道具与气象变动建议。"
     }
   ]
 }

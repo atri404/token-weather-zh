@@ -2,14 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Token Weather 汉化增强版 + 终端伴生宠物 (Desk Pet):
-// 1. 上下文窗口实时天气预报、多阶彩色进度条 (阶梯色彩)、全会话累计输入/输出/推理/命中率、输出速率、历史趋势图。
-// 2. 融入《crab-theater》桌面宠物机制: 完全 0 Token 额外开销，纯本地运行。
-//    - 监听工具调用与状态伴随;
-//    - 一旦上下文颜色/阶梯发生变动，宠物立即冒泡提醒上下文占用并给出实用建议！
+// 1. 上下文窗口实时天气预报、多阶分段彩色进度条 (参考 claude-deck segments 样式: ▰ ▱ 与暗轨色)、
+//    全会话累计输入/输出/推理/命中率、真实模型输出速率 (基于流式 step 纯生成耗时)、历史趋势走势图。
+// 2. 融入《crab-theater》桌面伴生宠物机制: 完全 0 Token 额外开销，纯本地状态机。
+//    - 6 种场景与道具看板伴随 (草原采风、熔炉锻造、城塞工坊、洞窟探宝、星际穿梭、远洋扬帆、营地小憩);
+//    - 步伐姿态与微表情随轮次交替;
+//    - 一旦上下文颜色/阶梯发生变动，宠物立即弹出专属警报/喜讯看板，播报占用并给出专业针对性建议！
 
 const HISTORY = 12;
 const BARS = "▁▂▃▄▅▆▇█";
 const BAR_WIDTH = 10;
+const TRACK_COLOR = "#3a3936"; // 参考 claude-deck 深度暗轨底色
 
 // 天气分档与阶梯色彩映射: 按上下文占用百分比 (<25% 绿, <50% 青, <75% 黄, <90% 洋红, ≥90% 红)
 const FORECAST = [
@@ -30,7 +33,7 @@ const PET_ADVICE = {
   },
   "多云": {
     up: "状态平稳健康，记忆脉络清晰，探索与多文件协作正常推进。",
-    down: "呼~ 内存整理成功！上下文降回到多云安全区，记忆整齐。",
+    down: "呼~ 内存大扫除成功！上下文降回到多云安全区，记忆整齐。",
     faceUp: "(V・ω・V)",
     faceDown: "٩(ˊᗜˋ*)و",
   },
@@ -61,15 +64,24 @@ let totalInput = 0;       // 总输入 = 未缓存输入 + 缓存写入 + 缓存
 let totalOutput = 0;      // 总输出
 let totalThinking = 0;    // 推理思考 token
 let totalCacheRead = 0;   // 缓存命中的输入
-// 最新一轮的模型输出速率 (tokens/s)
-let lastRate = null;
+
+// 模型输出速率统计
+let lastRate = null;      // 供渲染展示的 tokens/s
+let lastStepRate = null;  // 流式 step 测得的纯生成速率
 
 // 上一次记录的天气等级对象
 let lastForecastWord = null;
 // 宠物变动提醒对象: { from, to, color, direction, percent, tokens, window, advice, face, remainingTurns }
 let petAlert = null;
-// 最近一次调用的工具简述
-let lastToolAction = "正在守望上下文天气";
+// 宠物当前场景状态: { scene, face, action, sign }
+let currentPetStatus = {
+  scene: "营地小憩",
+  face: "(V・-・V)旦",
+  action: "守望天色 · 待命中",
+  sign: "",
+};
+// 轮次计数器，用于伴生宠物步态交替
+let turnCounter = 0;
 
 export function register(on) {
   on("session.start", async ($, e, next) => {
@@ -80,16 +92,23 @@ export function register(on) {
     totalThinking = 0;
     totalCacheRead = 0;
     lastRate = null;
+    lastStepRate = null;
     lastForecastWord = null;
     petAlert = null;
-    lastToolAction = "正在守望上下文天气";
+    turnCounter = 0;
+    currentPetStatus = {
+      scene: "营地小憩",
+      face: "(V・-・V)旦",
+      action: "守望天色 · 待命中",
+      sign: "",
+    };
     await takeReading($);
     return result;
   });
 
   on("tool.call", async ($, e, next) => {
     try {
-      lastToolAction = describeTool(e);
+      currentPetStatus = parseToolToScene(e, turnCounter);
     } catch {
       // 忽略解析异常
     }
@@ -98,11 +117,24 @@ export function register(on) {
     });
   });
 
+  // 监听纯模型流式生成步骤，精准计算纯吐字速率，排除前置思考延迟与工具调用耗时
+  on("turn.step", async function* ($, e, next) {
+    const t0 = Date.now();
+    const r = yield* next(e);
+    const ms = Date.now() - t0;
+    if (r && r.usage && typeof r.usage.output_tokens === "number" && r.usage.output_tokens > 0 && ms > 50) {
+      lastStepRate = r.usage.output_tokens / (ms / 1000);
+    }
+    return r;
+  });
+
   on("turn.complete", async ($, e, next) => {
     const result = await next(e);
     if (e.agentId) {
       return result;
     }
+    turnCounter++;
+
     if (e.usage) {
       const uncached = typeof e.usage.input_tokens === "number" ? e.usage.input_tokens : 0;
       const cacheCreate = typeof e.usage.cache_creation_input_tokens === "number" ? e.usage.cache_creation_input_tokens : 0;
@@ -120,12 +152,16 @@ export function register(on) {
       totalThinking += think;
       totalCacheRead += cacheRead;
 
-      if (out > 0 && typeof e.durationMs === "number" && e.durationMs > 0) {
+      // 速率计算: 优先采用 turn.step 纯生成时长的真实速率，否则回退
+      if (lastStepRate !== null && lastStepRate > 0) {
+        lastRate = lastStepRate;
+        lastStepRate = null;
+      } else if (out > 0 && typeof e.durationMs === "number" && e.durationMs > 0) {
         lastRate = out / (e.durationMs / 1000);
       }
     }
 
-    // 变色告警提示保留 2 轮后自动转为常态
+    // 变色告警提示保留 2 轮后自动平稳转为常态
     if (petAlert && typeof petAlert.remainingTurns === "number") {
       petAlert.remainingTurns -= 1;
       if (petAlert.remainingTurns <= 0) {
@@ -192,30 +228,87 @@ async function takeReading($) {
   }
 }
 
-// 借鉴 crab-theater 的零开销本地场景/动作映射
-function describeTool(e) {
-  if (!e || !e.tool) return "正在待命";
+// 借鉴《crab-theater》6大场景与动作映射机制
+function parseToolToScene(e, count) {
+  const stepMod = count % 2 === 0;
+  if (!e || !e.tool) {
+    return {
+      scene: "营地小憩",
+      face: stepMod ? "(V・-・V)旦" : "(V・o・V)旦",
+      action: "营地小憩喝茶 · 守望气象",
+      sign: "",
+    };
+  }
+
+  const baseName = (p) => String(p ?? "").split("/").pop();
+
   switch (e.tool) {
-    case "Read":
-      return "刚才阅览了代码文件";
+    case "Read": {
+      const file = baseName(e.input?.file_path);
+      return {
+        scene: "草原采风",
+        face: stepMod ? "(V ◕‿◕ V)ミ" : "(V ◕‿◕ V)",
+        action: "翻阅草丛卷轴",
+        sign: file ? `[${file}]` : "",
+      };
+    }
     case "Edit":
     case "Write":
-    case "NotebookEdit":
-      return "刚才打磨编辑了源码";
+    case "NotebookEdit": {
+      const file = baseName(e.input?.file_path ?? e.input?.notebook_path);
+      return {
+        scene: "熔炉锻造",
+        face: stepMod ? "(V・ω・V)🔨" : "(V・ω・V)",
+        action: "淬火锻打源码",
+        sign: file ? `[${file}]` : "",
+      };
+    }
+    case "Bash": {
+      const cmd = String(e.input?.command ?? "").trim().split(/\s+/).slice(0, 2).join(" ");
+      return {
+        scene: "城塞工坊",
+        face: stepMod ? "(V・o・V)⚡" : "(V・o・V)",
+        action: "操纵工坊矿车",
+        sign: cmd ? `[${cmd}]` : "",
+      };
+    }
     case "Grep":
     case "Glob":
-    case "ToolSearch":
-      return "刚才穿行探测了工程文件";
-    case "Bash":
-      return "刚才在终端中执行了指令";
+    case "ToolSearch": {
+      const q = String(e.input?.pattern ?? e.input?.query ?? "").slice(0, 16);
+      return {
+        scene: "洞窟探宝",
+        face: stepMod ? "(V・ω・V)🔍" : "(V・ω・V)",
+        action: "提灯探测矿脉",
+        sign: q ? `["${q}"]` : "",
+      };
+    }
     case "WebSearch":
-    case "WebFetch":
-      return "刚才穿梭网络检索了资料";
+    case "WebFetch": {
+      const url = String(e.input?.url ?? e.input?.query ?? "").replace(/^https?:\/\//, "").slice(0, 20);
+      return {
+        scene: "星际穿梭",
+        face: stepMod ? "(V ◕‿◕ V)🌌" : "(V ◕‿◕ V)",
+        action: "跃入星轨检索",
+        sign: url ? `[${url}]` : "",
+      };
+    }
     case "Agent":
-    case "Skill":
-      return "刚才调度协同了智能体";
+    case "Skill": {
+      return {
+        scene: "远洋扬帆",
+        face: stepMod ? "٩(◕‿◕)۶⛵" : "٩(◕‿◕)۶",
+        action: "乘风调度智能体",
+        sign: "",
+      };
+    }
     default:
-      return `刚才调用了工具 ${e.tool}`;
+      return {
+        scene: "工匠工坊",
+        face: "(V・ω・V)",
+        action: `调度工具 ${e.tool}`,
+        sign: "",
+      };
   }
 }
 
@@ -224,13 +317,13 @@ function renderWeatherAndPet(Box, Text, columns) {
   const f = forecastFor(now.percent);
   const trend = trendWord();
 
-  // === 第 1 行: 气象横幅与多阶彩色进度条 ===
+  // === 第 1 行: 气象横幅与多阶彩色进度条 (Segments 风格) ===
   const line1Parts = [
     // 1. 天气图标与状态词 (高亮阶梯色)
     Text({ color: f.color, bold: true, children: `${f.icon}  ${f.word}` }),
   ];
 
-  // 2. 多阶彩色进度条 (按百分比区间独立着色: 绿 -> 青 -> 黄 -> 洋红 -> 红)
+  // 2. 多阶分段彩色进度条 (参考 claude-deck segments 样式: ▰ ▱ 与暗轨色)
   const barParts = renderProgressBar(Text, now.percent, now.tokens);
   line1Parts.push(...barParts);
 
@@ -275,23 +368,30 @@ function renderWeatherAndPet(Box, Text, columns) {
 
   const row1 = Box({ flexDirection: "row", children: line1Parts });
 
-  // === 第 2 行: 桌面宠物伴生行 (Desk Pet) ===
-  // 窄屏仅在中屏及宽屏渲染伴生行，避免挤压终端高度
+  // === 第 2 行: 桌面伴生宠物行 (Desk Pet - crab-theater 机制) ===
+  // 极窄屏（< 60 列）精简为单行显示
   if (columns < 60) {
     return Box({ flexDirection: "column", paddingX: 1, children: [row1] });
   }
 
   const line2Parts = [];
   if (petAlert) {
-    // 触发颜色变动！高亮提示气泡与建议
-    line2Parts.push(Text({ color: petAlert.color, bold: true, children: `🦀 ${petAlert.face} 小蟹播报 [气象变动]: ` }));
+    // 触发颜色变动！弹出高亮气象警报/喜讯看板与专业建议
+    const isGoodNews = petAlert.direction === "down";
+    const titleTag = isGoodNews ? "气象放晴喜讯" : "气象变动警报";
+    line2Parts.push(Text({ color: petAlert.color, bold: true, children: `🦀 ${petAlert.face} [${titleTag}]: ` }));
     line2Parts.push(Text({ color: petAlert.color, children: `${petAlert.from} ➔ ${petAlert.to} (${petAlert.percent}% · ${short(petAlert.tokens)}/${short(petAlert.window)}) ` }));
-    line2Parts.push(Text({ dimColor: true, children: `💡 建议: ${petAlert.advice}` }));
+    line2Parts.push(Text({ color: petAlert.color, bold: true, children: "💡 建议: " }));
+    line2Parts.push(Text({ dimColor: true, children: petAlert.advice }));
   } else {
-    // 常态守护与状态伴随
-    const defaultFace = "(V ◕‿◕ V)";
-    line2Parts.push(Text({ color: f.color, children: `🦀 ${defaultFace} 小蟹守护: ` }));
-    line2Parts.push(Text({ dimColor: true, children: `${lastToolAction} · 当前天气${f.word}` }));
+    // 常态守护看板: 场景名 + 步态表情 + 动作解说 + 看板道具 + 当前气象
+    line2Parts.push(Text({ color: f.color, children: `🦀 ${currentPetStatus.face} ` }));
+    line2Parts.push(Text({ color: f.color, bold: true, children: `${currentPetStatus.scene}: ` }));
+    line2Parts.push(Text({ dimColor: true, children: currentPetStatus.action }));
+    if (currentPetStatus.sign) {
+      line2Parts.push(Text({ color: "cyan", children: ` ${currentPetStatus.sign}` }));
+    }
+    line2Parts.push(Text({ dimColor: true, children: ` · 气象${f.word}` }));
     if (now.percent >= 75) {
       line2Parts.push(Text({ color: f.color, bold: true, children: " (注意控制上下文体积)" }));
     }
@@ -302,9 +402,10 @@ function renderWeatherAndPet(Box, Text, columns) {
   return Box({ flexDirection: "column", paddingX: 1, children: [row1, row2] });
 }
 
-// 多阶彩色进度条生成器: 按槽位对应阶梯独立上色
+// 参考 claude-deck 的 segments 样式: ▰ ▱ 与暗轨底色 #3a3936，彻底告别刺眼灰色
 function renderProgressBar(Text, percent, tokens) {
-  const parts = [Text({ dimColor: true, children: "  [" })];
+  // 两端括号采用暗轨色，优雅自然
+  const parts = [Text({ color: TRACK_COLOR, children: "  [" })];
   const filledCount = tokens > 0 ? Math.min(BAR_WIDTH, Math.max(1, Math.round((percent / 100) * BAR_WIDTH))) : 0;
 
   if (filledCount > 0) {
@@ -318,23 +419,24 @@ function renderProgressBar(Text, percent, tokens) {
         currentRun++;
       } else {
         if (currentColor !== null && currentRun > 0) {
-          parts.push(Text({ color: currentColor, children: "█".repeat(currentRun) }));
+          parts.push(Text({ color: currentColor, children: "▰".repeat(currentRun) }));
         }
         currentColor = color;
         currentRun = 1;
       }
     }
     if (currentColor !== null && currentRun > 0) {
-      parts.push(Text({ color: currentColor, children: "█".repeat(currentRun) }));
+      parts.push(Text({ color: currentColor, children: "▰".repeat(currentRun) }));
     }
   }
 
   const emptyCount = BAR_WIDTH - filledCount;
   if (emptyCount > 0) {
-    parts.push(Text({ dimColor: true, children: "░".repeat(emptyCount) }));
+    // 未占用部分使用暗轨色 TRACK_COLOR 与空心分段符 ▱，完美融入终端底色
+    parts.push(Text({ color: TRACK_COLOR, children: "▱".repeat(emptyCount) }));
   }
 
-  parts.push(Text({ dimColor: true, children: "]" }));
+  parts.push(Text({ color: TRACK_COLOR, children: "]" }));
   return parts;
 }
 

@@ -4,7 +4,7 @@ import { describe, expect, test } from 'claude-code/testing'
 // 测试函数内的 on(...) 注册在插件下方，作为模拟底座。
 
 describe('token-weather-zh', () => {
-  test('主循环各轮填入横幅:多阶进度条、context、累计输入输出、推理、缓存命中率、输出速率与桌面宠物', async ($, on) => {
+  test('主循环各轮填入横幅:claude-deck segments 进度条(▰ ▱)、context、累计统计、流式速率与桌面伴生宠物场景', async ($, on) => {
     let window = 200_000
     let tokens = 0
     const invalidates: string[] = []
@@ -18,6 +18,21 @@ describe('token-weather-zh', () => {
     }))
     on('session.start', ($e, e) => ({ cwd: e.cwd }))
     on('tool.call', ($e, e) => ({ result: { content: 'mock content' } }))
+    on('turn.step', async function* ($e, e) {
+      return {
+        turnId: e.turnId,
+        index: e.index,
+        answer: 'ok',
+        toolUses: [],
+        stopReason: 'end_turn',
+        usage: {
+          input_tokens: 1000,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          output_tokens: 250,
+        },
+      }
+    })
     on('turn.complete', ($e, e) => ({ text: e.answer }))
     on('ui.render', ($e, e) => null)
     on('ui.invalidate', ($e, e, next) => {
@@ -27,8 +42,8 @@ describe('token-weather-zh', () => {
 
     await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
 
-    // 模拟调用工具 Read
-    await $.tool.call({ tool: 'Read', input: { file_path: '/tmp/test.ts' } })
+    // 模拟调用工具 Read (触发草原采风场景与看板道具)
+    await $.tool.call({ tool: 'Read', input: { file_path: '/src/auth.ts' } })
 
     tokens = 30_000
     // 第 1 轮: 输入 20k(其中 15k 来自缓存命中), 输出 5k, 推理 1.5k, 耗时 10s
@@ -73,11 +88,12 @@ describe('token-weather-zh', () => {
     const tree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 110, props: {} })
     const texts = JSON.stringify(tree)
 
-    // 进度条与 context
+    // 进度条与 context (使用实心 ▰ 和空心 ▱，以及暗轨色)
     expect(texts).toContain('[')
-    expect(texts).toContain('█')
-    expect(texts).toContain('░')
+    expect(texts).toContain('▰')
+    expect(texts).toContain('▱')
     expect(texts).toContain(']')
+    expect(texts).toContain('#3a3936') // 暗轨底色
     expect(texts).toContain('40%')
     expect(texts).toContain('context')
     expect(texts).toContain('80k / 200k')
@@ -95,12 +111,39 @@ describe('token-weather-zh', () => {
     expect(texts).toContain('/s')
     expect(texts).toContain('近几轮')
 
-    // 桌面宠物伴生
-    expect(texts).toContain('🦀')
-    expect(texts).toContain('小蟹')
+    expect(texts).toContain('[气象变动警报]')
+    expect(texts).toContain('晴朗 ➔ 多云')
+    expect(texts).toContain('💡 建议:')
+
+    // 第 3 轮: 不发生颜色变动 (仍为多云), 此时宠物看板回归常态场景并展示动作与道具
+    // 重置告警并调用新工具
+    await $.tool.call({ tool: 'Read', input: { file_path: '/src/auth.ts' } })
+    await $.turn.complete({
+      reason: 'answer',
+      answer: 'ok',
+      durationMs: 5000,
+      turnId: 't3',
+      usage: { input_tokens: 1000, output_tokens: 1000 },
+    })
+    await $.turn.complete({
+      reason: 'answer',
+      answer: 'ok',
+      durationMs: 5000,
+      turnId: 't4',
+      usage: { input_tokens: 1000, output_tokens: 1000 },
+    })
+
+    const steadyTree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 110, props: {} })
+    const steadyTexts = JSON.stringify(steadyTree)
+
+    // 桌面宠物常态伴生 (草原采风场景与看板道具)
+    expect(steadyTexts).toContain('🦀')
+    expect(steadyTexts).toContain('草原采风')
+    expect(steadyTexts).toContain('翻阅草丛卷轴')
+    expect(steadyTexts).toContain('[auth.ts]')
   })
 
-  test('颜色阶梯改变时，桌面宠物触发气象变动告警与针对性建议', async ($, on) => {
+  test('颜色阶梯改变时，桌面宠物触发气象变动告警看板与针对性建议', async ($, on) => {
     let window = 200_000
     let tokens = 20_000 // 10% (晴朗 green)
 
@@ -140,11 +183,11 @@ describe('token-weather-zh', () => {
     const texts = JSON.stringify(tree)
 
     // 验证桌面宠物变色气象提醒与建议触发
-    expect(texts).toContain('[气象变动]')
+    expect(texts).toContain('气象变动警报')
     expect(texts).toContain('阵雨')
     expect(texts).toContain('60%')
     expect(texts).toContain('120k / 200k')
-    expect(texts).toContain('建议:')
+    expect(texts).toContain('建议')
     expect(texts).toContain('避免全量')
   })
 
