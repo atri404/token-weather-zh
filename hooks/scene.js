@@ -220,7 +220,7 @@ const drawCrab = (c, x, ground, scene) => {
   const float = scene === 'space' ? Math.round(Math.sin(c.t / 350) * 2) : 0;
   const y0 = ground - 8 + float;
   const blink = Math.floor(c.t / 100) % 40 === 0;
-  const legs = LEGS[Math.floor(c.t / 150) % 2] ?? [];
+  const legs = LEGS[Math.floor(c.t / 450) % 2] ?? [];
   if (scene === 'sea') fill(c, x - 1, ground, 16, 1, 0x8a6a3a);
   const rows = [...BODY, ...legs];
   rows.forEach((row, dy) => {
@@ -279,7 +279,7 @@ export const paint = (layout, act, now, t) => {
     H,
     R,
     t,
-    s: Math.floor(t / 90),
+    s: Math.floor(t / 300), // 场景卷轴移动速度放慢 3 倍以上，温和舒缓
     px: new Int32Array(W * H).fill(-1),
     oc: new Uint32Array(W * R),
     of: new Uint32Array(W * R),
