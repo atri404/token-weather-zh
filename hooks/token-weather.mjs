@@ -4,11 +4,11 @@
 // Token Weather 汉化增强版: 上下文窗口实时天气预报（显示在提示符上方）
 //
 // turn.complete: 每轮主循环结束后读取 $.session.usage() 更新上下文占用;
-//                并从 e.usage 累计输入、输出、缓存读取, 计算命中率与输出速率。
+//                并从 e.usage 累计输入、输出、推理、缓存读取, 计算命中率与输出速率。
 // session.start: 会话启动时先采样一次, 保证首轮前即有预报。
 // ui.render (AbovePrompt): 单行渲染:
 //                天气图标 + 预报词 + 上下文百分比 + 占用/上限
-//                + 累计输入/输出/命中率 + 模型输出速率 + 近期趋势图 + 变动差值。
+//                + 累计输入/输出/推理/命中率 + 模型输出速率 + 近期趋势图 + 变动差值。
 
 const HISTORY = 12;
 const BARS = "▁▂▃▄▅▆▇█";
@@ -27,6 +27,7 @@ let readings = [];
 // 会话累计统计
 let totalInput = 0;       // 总输入 = 未缓存输入 + 缓存写入 + 缓存读取
 let totalOutput = 0;      // 总输出
+let totalThinking = 0;    // 推理思考 token
 let totalCacheRead = 0;   // 缓存命中的输入
 // 最新一轮的模型输出速率 (tokens/s)
 let lastRate = null;
@@ -37,6 +38,7 @@ export function register(on) {
     readings = [];
     totalInput = 0;
     totalOutput = 0;
+    totalThinking = 0;
     totalCacheRead = 0;
     lastRate = null;
     await takeReading($);
@@ -54,8 +56,15 @@ export function register(on) {
       const cacheRead = typeof e.usage.cache_read_input_tokens === "number" ? e.usage.cache_read_input_tokens : 0;
       const out = typeof e.usage.output_tokens === "number" ? e.usage.output_tokens : 0;
 
+      // 推理/思考 token：优先从 output_tokens_details.thinking_tokens 取，否则看 thinking_tokens
+      const details = e.usage.output_tokens_details;
+      const think = (details && typeof details.thinking_tokens === "number")
+        ? details.thinking_tokens
+        : (typeof e.usage.thinking_tokens === "number" ? e.usage.thinking_tokens : 0);
+
       totalInput += (uncached + cacheCreate + cacheRead);
       totalOutput += out;
+      totalThinking += think;
       totalCacheRead += cacheRead;
 
       if (out > 0 && typeof e.durationMs === "number" && e.durationMs > 0) {
@@ -109,7 +118,10 @@ function band(Box, Text, columns) {
   // 中等宽度及以上展示累计和速率
   if (columns >= 68) {
     if (totalInput > 0 || totalOutput > 0) {
-      let statStr = `  ∑ 入 ${short(totalInput)} 出 ${short(totalOutput)}`;
+      let statStr = `  ∑ 输入 ${short(totalInput)} 输出 ${short(totalOutput)}`;
+      if (totalThinking > 0) {
+        statStr += ` 推理 ${short(totalThinking)}`;
+      }
       if (totalInput > 0) {
         const hitRate = Math.round((totalCacheRead / totalInput) * 100);
         statStr += ` 命中 ${hitRate}%`;
@@ -122,7 +134,7 @@ function band(Box, Text, columns) {
   }
 
   // 宽屏额外展示趋势走势图
-  if (columns >= 92) {
+  if (columns >= 95) {
     parts.push(Text({ dimColor: true, children: "   近几轮 " }));
     parts.push(Text({ color: f.color, children: chart() }));
     if (trend) {

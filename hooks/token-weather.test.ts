@@ -4,7 +4,7 @@ import { describe, expect, test } from 'claude-code/testing'
 // 测试函数内的 on(...) 注册在插件下方，作为模拟底座。
 
 describe('token-weather-zh', () => {
-  test('主循环各轮填入横幅:读数、累计输入输出、缓存命中率、输出速率', async ($, on) => {
+  test('主循环各轮填入横幅:读数、累计输入输出、推理消耗、缓存命中率、输出速率', async ($, on) => {
     let window = 200_000
     let tokens = 0
     const invalidates: string[] = []
@@ -26,7 +26,7 @@ describe('token-weather-zh', () => {
 
     await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
     tokens = 30_000
-    // 第 1 轮: 输入 20k(其中 15k 来自缓存命中), 输出 5k, 耗时 10s
+    // 第 1 轮: 输入 20k(其中 15k 来自缓存命中), 输出 5k, 推理 1.5k, 耗时 10s
     await $.turn.complete({
       reason: 'answer',
       answer: 'ok',
@@ -37,11 +37,14 @@ describe('token-weather-zh', () => {
         cache_creation_input_tokens: 0,
         cache_read_input_tokens: 15_000,
         output_tokens: 5000,
+        output_tokens_details: {
+          thinking_tokens: 1500,
+        },
         model: 'claude-sonnet-4-6',
       },
     })
     tokens = 80_000
-    // 第 2 轮: 输入 80k(其中 65k 来自缓存命中), 输出 25k, 耗时 20s
+    // 第 2 轮: 输入 80k(其中 65k 来自缓存命中), 输出 25k, 推理 8k, 耗时 20s
     await $.turn.complete({
       reason: 'answer',
       answer: 'ok',
@@ -52,22 +55,26 @@ describe('token-weather-zh', () => {
         cache_creation_input_tokens: 5000,
         cache_read_input_tokens: 65_000,
         output_tokens: 25_000,
+        output_tokens_details: {
+          thinking_tokens: 8000,
+        },
         model: 'claude-sonnet-4-6',
       },
     })
 
     expect(invalidates).toContain('ui.render')
 
-    // 宽屏 (100 列)
-    const tree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 100, props: {} })
+    // 宽屏 (110 列)
+    const tree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 110, props: {} })
     const texts = JSON.stringify(tree)
 
     // 总输入: 20k + 80k = 100k
     // 总输出: 5k + 25k = 30k
+    // 总推理: 1.5k + 8k = 9.5k
     // 总缓存读取: 15k + 65k = 80k -> 命中率 80%
     expect(texts).toContain('40% 上下文')
     expect(texts).toContain('80k / 200k')
-    expect(texts).toContain('∑ 入 100k 出 30k 命中 80%')
+    expect(texts).toContain('∑ 输入 100k 输出 30k 推理 9.5k 命中 80%')
     expect(texts).toContain('⚡')
     expect(texts).toContain('/s')
     expect(texts).toContain('近几轮')
@@ -110,7 +117,7 @@ describe('token-weather-zh', () => {
     expect(narrowTexts).toContain('晴朗')
     expect(narrowTexts).toContain('20% 上下文')
     expect(narrowTexts).not.toContain('近几轮')
-    expect(narrowTexts).not.toContain('∑ 入')
+    expect(narrowTexts).not.toContain('∑ 输入')
   })
 
   test('子 agent 的轮次不改变横幅', async ($, on) => {
@@ -148,6 +155,6 @@ describe('token-weather-zh', () => {
     const tree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 100, props: {} })
     const texts = JSON.stringify(tree)
 
-    expect(texts).not.toContain('∑ 入')
+    expect(texts).not.toContain('∑ 输入')
   })
 })
