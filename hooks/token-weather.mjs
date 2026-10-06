@@ -7,7 +7,7 @@
 //                并从 e.usage 累计输入、输出、推理、缓存读取, 计算命中率与输出速率。
 // session.start: 会话启动时先采样一次, 保证首轮前即有预报。
 // ui.render (AbovePrompt): 单行渲染:
-//                天气图标 + 预报词 + 进度条 + 上下文百分比 + 占用/上限
+//                天气图标 + 预报词 + 多阶彩色进度条 + 上下文百分比 + 占用/上限
 //                + 累计输入/累计输出/推理/命中率 + 模型输出速率 + 近期趋势图 + 变动差值。
 
 const HISTORY = 12;
@@ -114,34 +114,44 @@ function band(Box, Text, columns) {
   const emptyCount = BAR_WIDTH - filledCount;
 
   const parts = [
+    // 1. 天气图标与状态词 (高亮阶梯色)
     Text({ color: f.color, bold: true, children: `${f.icon}  ${f.word}` }),
+    // 2. 进度条 (已用彩色，未用暗灰)
     Text({ dimColor: true, children: "  [" }),
     Text({ color: f.color, children: "█".repeat(filledCount) }),
     Text({ dimColor: true, children: `${"░".repeat(emptyCount)}]` }),
-    Text({ children: `  ${now.percent}% context` }),
+    // 3. 上下文百分比 (高亮阶梯色 + 白色标签)
+    Text({ color: f.color, bold: true, children: `  ${now.percent}%` }),
+    Text({ children: " context" }),
+    // 4. 当前/上限数值 (暗灰)
     Text({ dimColor: true, children: `  ${short(now.tokens)} / ${short(now.window)}` }),
   ];
 
-  // 中等宽度及以上展示累计和速率
-  if (columns >= 72) {
+  // 中等宽度及以上展示丰富累计与速率
+  if (columns >= 65) {
     if (totalInput > 0 || totalOutput > 0) {
-      let statStr = `  ∑ 累计输入 ${short(totalInput)} 累计输出 ${short(totalOutput)}`;
+      parts.push(Text({ dimColor: true, children: "  ∑ 累计输入 " }));
+      parts.push(Text({ color: "cyan", bold: true, children: short(totalInput) }));
+      parts.push(Text({ dimColor: true, children: " 累计输出 " }));
+      parts.push(Text({ color: "green", bold: true, children: short(totalOutput) }));
+
       if (totalThinking > 0) {
-        statStr += ` 推理 ${short(totalThinking)}`;
+        parts.push(Text({ dimColor: true, children: " 推理 " }));
+        parts.push(Text({ color: "magenta", bold: true, children: short(totalThinking) }));
       }
       if (totalInput > 0) {
         const hitRate = Math.round((totalCacheRead / totalInput) * 100);
-        statStr += ` 命中 ${hitRate}%`;
+        parts.push(Text({ dimColor: true, children: " 命中 " }));
+        parts.push(Text({ color: "cyan", children: `${hitRate}%` }));
       }
-      parts.push(Text({ dimColor: true, children: statStr }));
     }
     if (lastRate !== null && lastRate > 0) {
-      parts.push(Text({ dimColor: true, children: `  ⚡ ${rate(lastRate)}/s` }));
+      parts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
     }
   }
 
-  // 宽屏额外展示趋势走势图
-  if (columns >= 100) {
+  // 宽屏额外展示趋势走势图与上一轮增量
+  if (columns >= 90) {
     parts.push(Text({ dimColor: true, children: "   近几轮 " }));
     parts.push(Text({ color: f.color, children: chart() }));
     if (trend) {

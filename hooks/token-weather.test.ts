@@ -73,11 +73,19 @@ describe('token-weather-zh', () => {
     expect(texts).toContain('█')
     expect(texts).toContain('░')
     expect(texts).toContain(']')
-    expect(texts).toContain('40% context')
+    expect(texts).toContain('40%')
+    expect(texts).toContain('context')
     expect(texts).toContain('80k / 200k')
 
-    // 累计输入输出与推理
-    expect(texts).toContain('∑ 累计输入 100k 累计输出 30k 推理 9.5k 命中 80%')
+    // 彩色累计输入输出与推理
+    expect(texts).toContain('∑ 累计输入')
+    expect(texts).toContain('100k')
+    expect(texts).toContain('累计输出')
+    expect(texts).toContain('30k')
+    expect(texts).toContain('推理')
+    expect(texts).toContain('9.5k')
+    expect(texts).toContain('命中')
+    expect(texts).toContain('80%')
     expect(texts).toContain('⚡')
     expect(texts).toContain('/s')
     expect(texts).toContain('近几轮')
@@ -118,7 +126,8 @@ describe('token-weather-zh', () => {
     const narrowTexts = JSON.stringify(narrowTree)
 
     expect(narrowTexts).toContain('晴朗')
-    expect(narrowTexts).toContain('20% context')
+    expect(narrowTexts).toContain('20%')
+    expect(narrowTexts).toContain('context')
     expect(narrowTexts).toContain('[')
     expect(narrowTexts).toContain(']')
     expect(narrowTexts).not.toContain('近几轮')
