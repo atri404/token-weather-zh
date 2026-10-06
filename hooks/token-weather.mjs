@@ -17,9 +17,9 @@ const BARS = "▁▂▃▄▅▆▇█";
 const BAR_WIDTH = 10;
 const TRACK_COLOR = "#3a3936"; // 参考 claude-deck 深度暗轨底色
 
-const ROWS = 5;
+const ROWS = 2; // 极简纯粹：仅 2 行高度 (4 像素纵向，完美呈现迷你方块小蟹)
 const KEY = 'scene';
-const TICK_MS = 180; // 动画帧率大幅放缓，避免高速刷新导致终端眩晕
+const TICK_MS = 70; // 恢复流畅丝滑 70ms 帧率 (~14fps)
 const EPOCH = Date.now();
 
 // 天气分档与阶梯色彩映射: 按上下文占用百分比 (<25% 绿, <50% 青, <75% 黄, <90% 洋红, ≥90% 红)
@@ -431,7 +431,7 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
   line1Parts.push(Text({ dimColor: true, children: `  ${short(now.tokens)} / ${short(now.window)}` }));
 
   // 中等宽度及以上展示丰富累计与速率 (已有消耗时展示；若主会话尚未开始则等待统计产生)
-  if (W >= 60) {
+  if (W >= 65) {
     if (totalInput > 0 || totalOutput > 0) {
       line1Parts.push(Text({ dimColor: true, children: "  ∑ 累计输入 " }));
       line1Parts.push(Text({ color: "cyan", bold: true, children: short(totalInput) }));
@@ -452,7 +452,7 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
     }
   }
 
-  if (W >= 80) {
+  if (W >= 85) {
     line1Parts.push(Text({ dimColor: true, children: "   近几轮 " }));
     line1Parts.push(Text({ color: f.color, children: chart() }));
     if (trend) {
@@ -463,49 +463,46 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
   const row1 = Box({ flexDirection: "row", width: W, children: line1Parts });
 
   // 窄屏降级只显示横幅
-  if (W < 60) {
+  if (W < 45) {
     mount = null;
     return Box({ flexDirection: "column", width: W, children: [row1] });
   }
 
-  // 暗轨分割线 (连接横幅与大剧场舞台，整条线横向铺满终端全宽 W)
-  const divider = Box({ width: W, children: [Text({ color: TRACK_COLOR, children: "─".repeat(W) })] });
-
-  // === 第 2 块: 原作者 9 行像素大剧场 (Crab Theater Raster，横向全宽铺满 W) ===
-  const crabX = Math.max(2, Math.floor(W * 0.18));
-  const bx = crabX + 15;
-  const maxBw = Math.max(20, W - bx - 2);
-  const bw = Math.min(width(act.say) + 4, maxBw, 64);
-  const bubble = act.say && bw >= 12 ? { x: bx, w: bw } : null;
-
-  mount = { requestId, W, R: ROWS, crabX, bubble };
+  // === 第 2 块: 纯粹左下角 2 行迷你小蟹与言语标牌 (0 背景干扰) ===
+  const crabX = 1; // 紧贴左下角
+  mount = { requestId, W, R: ROWS, crabX };
   const currentTime = Date.now();
   const cells = paint(mount, act, currentTime, currentTime - EPOCH);
 
+  // 第一层: 2行 Raster (包含左下角迷你小方蟹以及工具滑入特效标牌)
   const theaterChildren = [
     Raster({ key: KEY, columns: W, rows: ROWS, cells }),
   ];
 
-  if (bubble) {
+  // 第二层: 伴生言语提示框（无缝排列在小蟹及标牌右方）
+  if (act.say) {
     const chars = Array.from(act.say);
     const shown = (typed > 0 && typed < chars.length) ? chars.slice(0, typed).join('') : act.say;
+    // 动态计算气泡在第二行的起始 X 坐标
+    const startX = Math.min(32, Math.floor(W * 0.35));
+    const availW = Math.max(16, W - startX - 2);
     const bubbleBox = Box({
       position: "absolute",
       top: 0,
-      left: bubble.x,
-      width: bubble.w,
-      height: 3,
-      borderStyle: "round",
-      borderColor: "#de7356",
-      paddingX: 1,
-      children: [Text({ children: fit(shown, bubble.w - 4) })],
+      left: startX,
+      width: availW,
+      height: 2,
+      children: [
+        Text({ dimColor: true, children: "💬 " }),
+        Text({ color: "#de7356", children: fit(shown, availW - 4) }),
+      ],
     });
     theaterChildren.push(bubbleBox);
   }
 
   const theaterBox = Box({ width: W, height: ROWS, children: theaterChildren });
 
-  return Box({ flexDirection: "column", width: W, children: [row1, divider, theaterBox] });
+  return Box({ flexDirection: "column", width: W, children: [row1, theaterBox] });
 }
 
 function renderProgressBar(Text, percent, tokens) {

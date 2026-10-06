@@ -1,7 +1,7 @@
 {
   "name": "token-weather",
-  "version": "1.0.2",
-  "description": "上下文窗口天气预报(汉化增强版 + 像素大剧场): claude-deck segments 多阶彩色进度条(▰ ▱与暗轨底色)、累计输入/输出/推理/命中率、真实纯流式模型输出速率，深度融入原版《crab-theater》9 行 24-bit 像素画布大舞台引擎与 Claude 官方暖橙方块小蟹(Claw'd)。",
+  "version": "1.0.3",
+  "description": "上下文窗口天气预报(汉化增强版 + 纯净左下角迷你小蟹): claude-deck segments 多阶彩色进度条(▰ ▱与暗轨底色)、累计输入/输出/推理/命中率、真实纯流式模型输出速率，左下角 2 行高 24-bit 丝滑迷你方块小蟹(Claw'd)与动态工具标牌言语提示。",
   "author": {
     "name": "atri404"
   }
