@@ -190,8 +190,14 @@ export function register(on) {
 
     timer?.cancel?.();
     timer = null;
+    let tickCount = 0;
     try {
       timer = $.clock.every(TICK_MS, () => {
+        tickCount++;
+        // 每约 1.5 秒自动同步一次上下文最新读数，保证 compact 等操作后即时感知
+        if (tickCount % 20 === 0) {
+          void takeReading($);
+        }
         if (!mount) return;
         if (typed < Array.from(act.say).length) {
           typed += 1;
@@ -208,6 +214,7 @@ export function register(on) {
   });
 
   on('prompt.submit', ($, e, next) => {
+    void takeReading($);
     const say = pick(['思考中… 规划航线', '正在审阅委托卷轴', '点亮灯火，准备出发']);
     setAct($, { id: nextId++, scene: pick(['meadow', 'space', 'sea']), say, label: '', at: Date.now() });
     return next(e);
@@ -280,15 +287,16 @@ export function register(on) {
     if (e.turnId) recordedTurns.add(e.turnId);
 
     if (isNewTurn && e.usage) {
-      const uncached = typeof e.usage.input_tokens === 'number' ? e.usage.input_tokens : 0;
-      const cacheCreate = typeof e.usage.cache_creation_input_tokens === 'number' ? e.usage.cache_creation_input_tokens : 0;
-      const cacheRead = typeof e.usage.cache_read_input_tokens === 'number' ? e.usage.cache_read_input_tokens : 0;
-      const out = typeof e.usage.output_tokens === 'number' ? e.usage.output_tokens : 0;
+      const u = e.usage;
+      const uncached = typeof u.input_tokens === 'number' ? u.input_tokens : 0;
+      const cacheCreate = typeof u.cache_creation_input_tokens === 'number' ? u.cache_creation_input_tokens : 0;
+      const cacheRead = typeof u.cache_read_input_tokens === 'number' ? u.cache_read_input_tokens : 0;
+      const out = typeof u.output_tokens === 'number' ? u.output_tokens : 0;
 
-      const details = e.usage.output_tokens_details;
+      const details = u.output_tokens_details;
       const think = (details && typeof details.thinking_tokens === 'number')
         ? details.thinking_tokens
-        : (typeof e.usage.thinking_tokens === 'number' ? e.usage.thinking_tokens : 0);
+        : (typeof u.thinking_tokens === 'number' ? u.thinking_tokens : 0);
 
       totalInput += (uncached + cacheCreate + cacheRead);
       totalOutput += out;
@@ -311,16 +319,17 @@ export function register(on) {
       }
     }
 
-    if (!petAlert && act && act.say) {
-      if (act.say.startsWith('思考中') || act.say.includes('准备出发') || act.say.includes('审阅委托')) {
-        act = {
-          ...act,
-          id: nextId++,
-          say: '任务交付 · 守望天色',
-          at: Date.now(),
-        };
-        typed = 0;
-      }
+    // 单轮任务结束后自动退出思考中状态，回归常态守望
+    if (!petAlert) {
+      act = {
+        ...act,
+        id: nextId++,
+        scene: act.scene,
+        say: '回答完毕 · 守望天色',
+        label: '',
+        at: Date.now(),
+      };
+      typed = 0;
     }
 
     await takeReading($);
@@ -328,8 +337,12 @@ export function register(on) {
   });
 
   on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => {
-    if (e.hasSurvey || readings.length === 0) {
+    if (e.hasSurvey) {
       return next(e);
+    }
+    if (readings.length === 0) {
+      void takeReading($);
+      readings.push({ tokens: 0, window: 200_000, percent: 0 });
     }
     const { Box, Text, Raster } = $.ui.resolve(e);
     const W = Math.min(e.bodyColumns ?? 80, 512);
@@ -340,11 +353,15 @@ export function register(on) {
 
 async function takeReading($) {
   try {
-    const { context } = await $.session.usage();
+    const usage = await $.session.usage();
+    const context = usage?.context ?? usage;
     if (!context || !context.window) return;
     const tokens = context.tokens ?? 0;
     const percent = Math.round(context.percent ?? (tokens / context.window) * 100);
-    readings = readings.filter((r) => r.tokens > 0);
+    // 过滤掉无意义的初始空读数
+    if (tokens > 0) {
+      readings = readings.filter((r) => r.tokens > 0);
+    }
     readings.push({ tokens, window: context.window, percent });
     if (readings.length > HISTORY) readings = readings.slice(-HISTORY);
 
