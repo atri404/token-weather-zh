@@ -62,10 +62,12 @@ let totalInput = 0;
 let totalOutput = 0;
 let totalThinking = 0;
 let totalCacheRead = 0;
+let totalCacheWrite = 0;
 const recordedTurns = new Set();
 
-// 模型纯流式输出速率统计
+// 模型纯流式输出速率与首字延迟统计 (EWMA 平滑)
 let lastRate = null;
+let lastTtft = null;
 let activeTurnPureTokens = 0;
 let activeTurnPureMs = 0;
 
@@ -178,8 +180,10 @@ export function register(on) {
     totalOutput = 0;
     totalThinking = 0;
     totalCacheRead = 0;
+    totalCacheWrite = 0;
     recordedTurns.clear();
     lastRate = null;
+    lastTtft = null;
     activeTurnPureTokens = 0;
     activeTurnPureMs = 0;
     lastForecastWord = null;
@@ -223,6 +227,8 @@ export function register(on) {
 
   on('prompt.submit', ($, e, next) => {
     void takeReading($);
+    activeTurnPureTokens = 0;
+    activeTurnPureMs = 0;
     const say = pick(['思考中… 规划航线', '正在审阅委托卷轴', '点亮灯火，准备出发']);
     setAct($, { id: nextId++, scene: pick(['meadow', 'space', 'sea']), say, label: '', at: Date.now() });
     return next(e);
@@ -244,9 +250,9 @@ export function register(on) {
     }
   });
 
-  // 监听纯模型流式生成步骤，精确计算纯流式输出吞吐
+  // 监听纯模型流式生成步骤，精确计算纯流式输出吞吐与首字延迟 (TTFT)
   on('turn.step', async function* ($, e, next) {
-    const t0 = Date.now();
+    const t0 = performance.now();
     let firstTokenTime = null;
     let lastTokenTime = null;
     let chunkCount = 0;
@@ -260,9 +266,15 @@ export function register(on) {
         break;
       }
       const val = item.value;
-      const now = Date.now();
+      const now = performance.now();
       if (val && (val.kind === "text" || val.kind === "thinking" || val.kind === "input" || val.kind === "tool")) {
-        if (firstTokenTime === null) firstTokenTime = now;
+        if (firstTokenTime === null) {
+          firstTokenTime = now;
+          const stepTtft = now - t0;
+          if (stepTtft >= 5) {
+            lastTtft = lastTtft === null ? stepTtft : 0.7 * stepTtft + 0.3 * lastTtft;
+          }
+        }
         lastTokenTime = now;
         chunkCount++;
       }
@@ -276,7 +288,7 @@ export function register(on) {
         activeTurnPureTokens += tokens;
         activeTurnPureMs += streamMs;
       } else {
-        const stepMs = Date.now() - t0;
+        const stepMs = performance.now() - t0;
         if (stepMs >= 30) {
           activeTurnPureTokens += tokens;
           activeTurnPureMs += stepMs;
@@ -310,11 +322,24 @@ export function register(on) {
       totalOutput += out;
       totalThinking += think;
       totalCacheRead += cacheRead;
+      totalCacheWrite += cacheCreate;
 
+      let currentTurnRate = null;
       if (activeTurnPureTokens > 0 && activeTurnPureMs > 0) {
-        lastRate = activeTurnPureTokens / (activeTurnPureMs / 1000);
+        currentTurnRate = activeTurnPureTokens / (activeTurnPureMs / 1000);
       } else if (out > 0 && typeof e.durationMs === 'number' && e.durationMs > 0) {
-        lastRate = out / (e.durationMs / 1000);
+        currentTurnRate = out / (e.durationMs / 1000);
+      }
+
+      if (currentTurnRate !== null && currentTurnRate > 0) {
+        if (lastRate === null) {
+          lastRate = currentTurnRate;
+        } else {
+          // EWMA 指数移动平均平滑滤波：长输出(>50 tokens)高置信度权重(0.75)，短响应保持平滑稳定性(0.35)
+          const tokenCount = activeTurnPureTokens > 0 ? activeTurnPureTokens : out;
+          const alpha = tokenCount >= 50 ? 0.75 : 0.35;
+          lastRate = alpha * currentTurnRate + (1 - alpha) * lastRate;
+        }
       }
       activeTurnPureTokens = 0;
       activeTurnPureMs = 0;
@@ -502,6 +527,11 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
 
   if (rightW >= 60 && lastRate !== null && lastRate > 0) {
     line2Parts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
+    if (lastTtft !== null && lastTtft > 0 && rightW >= 75) {
+      line2Parts.push(Text({ dimColor: true, children: " (首字 " }));
+      line2Parts.push(Text({ color: "cyan", children: formatTtft(lastTtft) }));
+      line2Parts.push(Text({ dimColor: true, children: ")" }));
+    }
   }
 
   if (rightW >= 75) {
@@ -581,4 +611,9 @@ function short(n) {
 function rate(r) {
   if (r >= 1000) return `${(r / 1000).toFixed(r >= 10000 ? 0 : 1)}k`;
   return r >= 100 ? r.toFixed(0) : r.toFixed(1);
+}
+
+function formatTtft(ms) {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 1000).toFixed(2)}s`;
 }

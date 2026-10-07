@@ -274,4 +274,67 @@ describe('token-weather-zh', () => {
 
     expect(texts).not.toContain('∑ 累计输入')
   })
+
+  test('流式输出计算首字延迟(TTFT)与纯流式速率并在横幅展示', async ($, on) => {
+    const window = 200_000
+    const tokens = 10_000
+
+    on('session.usage', () => ({
+      value: {
+        startedAt: 0,
+        context: { window, tokens, percent: 5 },
+        rateLimits: [],
+      },
+    }))
+    on('session.start', ($e, e) => ({ cwd: e.cwd }))
+    on('turn.step', async function* ($e, e) {
+      // 模拟首字延迟与多 chunk 流式输出
+      await new Promise((r) => setTimeout(r, 15))
+      yield { kind: 'text', index: 0, text: 'Hello' }
+      await new Promise((r) => setTimeout(r, 35))
+      yield { kind: 'text', index: 1, text: ' world' }
+      return {
+        turnId: e.turnId,
+        index: e.index,
+        answer: 'Hello world',
+        toolUses: [],
+        stopReason: 'end_turn',
+        usage: {
+          input_tokens: 500,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 2000,
+          output_tokens: 100,
+        },
+      }
+    })
+    on('turn.complete', ($e, e) => ({ text: e.answer }))
+    on('ui.render', ($e, e) => null)
+
+    await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+
+    const gen = $.turn.step({ turnId: 't-stream', index: 0, model: 'claude-sonnet-4-6' })
+    for await (const _ of gen) {}
+
+    await $.turn.complete({
+      reason: 'answer',
+      answer: 'Hello world',
+      durationMs: 60,
+      turnId: 't-stream',
+      usage: {
+        input_tokens: 500,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 2000,
+        output_tokens: 100,
+      },
+    })
+
+    const tree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 110, props: {} })
+    const texts = JSON.stringify(tree)
+
+    expect(texts).toContain('⚡')
+    expect(texts).toContain('/s')
+    expect(texts).toContain('首字')
+    expect(texts).toContain('命中')
+    expect(texts).toContain('80%')
+  })
 })
