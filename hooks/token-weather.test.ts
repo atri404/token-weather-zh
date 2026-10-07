@@ -337,4 +337,41 @@ describe('token-weather-zh', () => {
     expect(texts).toContain('命中')
     expect(texts).toContain('80%')
   })
+
+  test('输入为0时不出现 NaN 命中率，且多轮次推进正常记录历史走势', async ($, on) => {
+    let window = 200_000
+    let tokens = 10_000
+
+    on('session.usage', () => ({
+      value: {
+        startedAt: 0,
+        context: { window, tokens, percent: 5 },
+        rateLimits: [],
+      },
+    }))
+    on('session.start', ($e, e) => ({ cwd: e.cwd }))
+    on('turn.complete', ($e, e) => ({ text: e.answer }))
+    on('ui.render', ($e, e) => null)
+
+    await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+
+    // 仅有输出无输入(极端 edge-case)
+    await $.turn.complete({
+      reason: 'answer',
+      answer: 'edge',
+      durationMs: 100,
+      turnId: 't-edge',
+      usage: {
+        input_tokens: 0,
+        output_tokens: 50,
+      },
+    })
+
+    const tree = await $.ui.render({ component: 'AbovePrompt', surface: 'terminal', bodyColumns: 110, props: {} })
+    const texts = JSON.stringify(tree)
+
+    expect(texts).not.toContain('NaN')
+    expect(texts).toContain('命中')
+    expect(texts).toContain('0%')
+  })
 })

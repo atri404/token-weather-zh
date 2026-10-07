@@ -77,10 +77,10 @@ let petAlert = null;
 
 // 像素大剧场状态
 let act = { id: 0, scene: 'meadow', say: '营地小憩 · 守望天色', label: '', at: 0 };
-let typed = 0;
 let nextId = 1;
 let mount = null;
 let timer = null;
+let lastBlitCells = null;
 
 const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
 const base = (p) => String(p ?? '').split('/').filter(Boolean).pop() ?? p;
@@ -168,7 +168,6 @@ const describeTool = (tool, a) => {
 
 const setAct = ($, next) => {
   act = next;
-  typed = 0;
   $.ui.invalidate('ui.render');
 };
 
@@ -188,8 +187,8 @@ export function register(on) {
     activeTurnPureMs = 0;
     lastForecastWord = null;
     petAlert = null;
-    typed = 0;
     mount = null;
+    lastBlitCells = null;
     act = { id: nextId++, scene: 'meadow', say: '营地小憩 · 守望气象', label: '', at: Date.now() };
 
     timer?.cancel?.();
@@ -198,18 +197,18 @@ export function register(on) {
     try {
       timer = $.clock.every(TICK_MS, () => {
         tickCount++;
-        // 每约 1.5 秒自动同步一次上下文最新读数，保证 compact 等操作后即时感知
-        if (tickCount % 20 === 0) {
+        // 降低心跳轮询频次 (~3 秒)，且仅在读数真正变动时触发 ui.render 重绘
+        if (tickCount % 40 === 0) {
           void takeReading($);
         }
         if (!mount) return;
-        if (typed < Array.from(act.say).length) {
-          typed += 1;
-          $.ui.invalidate('ui.render');
-          return;
-        }
         const now = Date.now();
-        void $.ui.blit({ requestId: mount.requestId, key: KEY, cells: paint(mount, act, now, now - EPOCH) });
+        const cells = paint(mount, act, now, now - EPOCH);
+        // 增量 IPC 优化：仅当小蟹帧发生变化(走步/眨眼)时才执行 blit
+        if (cells !== lastBlitCells) {
+          lastBlitCells = cells;
+          void $.ui.blit({ requestId: mount.requestId, key: KEY, cells });
+        }
       });
     } catch {}
 
@@ -220,7 +219,8 @@ export function register(on) {
   on('session.measure', async ($, e, next) => {
     const result = await next(e);
     if (e.context) {
-      applyContextReading(e.context);
+      const changed = applyContextReading(e.context);
+      if (changed) $.ui.invalidate('ui.render');
     }
     return result;
   });
@@ -239,15 +239,11 @@ export function register(on) {
     const who = e.agentId ? '僚机' : '';
     setAct($, { id: nextId++, scene: info.scene, say: who + info.say, label: info.label, at: Date.now() });
     const mine = act.id;
-    try {
-      const result = await next(e);
-      if (act.id === mine) {
-        setAct($, { ...act, id: nextId++, say: who + info.after });
-      }
-      return result;
-    } catch (err) {
-      throw err;
+    const result = await next(e);
+    if (act.id === mine) {
+      setAct($, { ...act, id: nextId++, say: who + info.after });
     }
+    return result;
   });
 
   // 监听纯模型流式生成步骤，精确计算纯流式输出吞吐与首字延迟 (TTFT)
@@ -362,10 +358,9 @@ export function register(on) {
         label: '',
         at: Date.now(),
       };
-      typed = 0;
     }
 
-    await takeReading($);
+    await takeReading($, true);
     return result;
   });
 
@@ -385,14 +380,28 @@ export function register(on) {
   });
 }
 
-function applyContextReading(context) {
-  if (!context || !context.window) return;
+function applyContextReading(context, isNewTurn = false) {
+  if (!context || !context.window) return false;
   const tokens = context.tokens ?? 0;
   const percent = Math.round(context.percent ?? (tokens / context.window) * 100);
+  const last = readings[readings.length - 1];
+
+  let changed = false;
+  if (!last || last.tokens !== tokens || last.window !== context.window || last.percent !== percent) {
+    changed = true;
+  }
+
   if (tokens > 0) {
     readings = readings.filter((r) => r.tokens > 0);
   }
-  readings.push({ tokens, window: context.window, percent });
+
+  if (isNewTurn || readings.length === 0) {
+    readings.push({ tokens, window: context.window, percent });
+  } else if (last) {
+    last.tokens = tokens;
+    last.window = context.window;
+    last.percent = percent;
+  }
   if (readings.length > HISTORY) readings = readings.slice(-HISTORY);
 
   const curForecast = forecastFor(percent);
@@ -424,17 +433,20 @@ function applyContextReading(context) {
       label: `${percent}%`,
       at: Date.now(),
     };
-    typed = 0;
+    changed = true;
   }
   lastForecastWord = curForecast.word;
+  return changed;
 }
 
-async function takeReading($) {
+async function takeReading($, isNewTurn = false) {
   try {
     const usage = await $.session.usage();
     const context = usage?.context ?? usage;
-    applyContextReading(context);
-    $.ui.invalidate('ui.render');
+    const changed = applyContextReading(context, isNewTurn);
+    if (changed) {
+      $.ui.invalidate('ui.render');
+    }
   } catch {}
 }
 
@@ -481,19 +493,35 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
 
   const rightW = Math.max(10, W - CRAB_W);
 
-  // === 第 1 行 (右侧上): 螃蟹百分比与言语台词 ===
+  // === 第 1 行 (右侧上): 负载百分比、言语台词、纯流式输出速率与首字延迟 ===
   const line1Parts = [
     Text({ color: f.color, bold: true, children: ` ${now.percent}%` }),
   ];
 
+  // 纯流式输出速率与首字延迟徽章 (展示在第 1 行右侧，平衡双行视觉密度)
+  const rateParts = [];
+  if (lastRate !== null && lastRate > 0) {
+    rateParts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
+    if (lastTtft !== null && lastTtft > 0 && rightW >= 75) {
+      rateParts.push(Text({ dimColor: true, children: " (首字 " }));
+      rateParts.push(Text({ color: "cyan", children: formatTtft(lastTtft) }));
+      rateParts.push(Text({ dimColor: true, children: ")" }));
+    }
+  }
+
+  const rateWidth = rateParts.length > 0 ? (lastTtft !== null && lastTtft > 0 && rightW >= 75 ? 18 : 8) : 0;
+  const pctWidth = width(` ${now.percent}%`);
+
   if (act.say) {
-    const chars = Array.from(act.say);
-    const shown = (typed > 0 && typed < chars.length) ? chars.slice(0, typed).join('') : act.say;
     const isAlert = act.say.includes('警报') || act.say.includes('喜讯');
     const textColor = isAlert ? f.color : "#de7356";
-    const availW = Math.max(10, rightW - 10);
+    const availSpeechW = Math.max(8, rightW - pctWidth - rateWidth - 4);
     line1Parts.push(Text({ dimColor: true, children: "  💬 " }));
-    line1Parts.push(Text({ color: textColor, children: fit(shown, availW) }));
+    line1Parts.push(Text({ color: textColor, children: fit(act.say, availSpeechW) }));
+  }
+
+  if (rateParts.length > 0) {
+    line1Parts.push(...rateParts);
   }
 
   const row1 = Box({ flexDirection: "row", width: rightW, children: line1Parts });
@@ -520,18 +548,9 @@ function renderTheaterWithWeather(Box, Text, Raster, W, requestId) {
       line2Parts.push(Text({ dimColor: true, children: " 推理 " }));
       line2Parts.push(Text({ color: "magenta", bold: true, children: short(totalThinking) }));
     }
-    const hitRate = Math.round((totalCacheRead / totalInput) * 100);
+    const hitRate = totalInput > 0 ? Math.round((totalCacheRead / totalInput) * 100) : 0;
     line2Parts.push(Text({ dimColor: true, children: " 命中 " }));
     line2Parts.push(Text({ color: "cyan", children: `${hitRate}%` }));
-  }
-
-  if (rightW >= 60 && lastRate !== null && lastRate > 0) {
-    line2Parts.push(Text({ color: "yellow", bold: true, children: `  ⚡ ${rate(lastRate)}/s` }));
-    if (lastTtft !== null && lastTtft > 0 && rightW >= 75) {
-      line2Parts.push(Text({ dimColor: true, children: " (首字 " }));
-      line2Parts.push(Text({ color: "cyan", children: formatTtft(lastTtft) }));
-      line2Parts.push(Text({ dimColor: true, children: ")" }));
-    }
   }
 
   if (rightW >= 75) {
